@@ -2,7 +2,7 @@
 
 This is a little script to help with creating a new IAM from an existing one.
 
-[How to make a copy of AWS IAM role with all its policies](https://www.maxivanov.io/copy-aws-iam-role/).
+Based on: [How to make a copy of AWS IAM role with all its policies](https://www.maxivanov.io/copy-aws-iam-role/).
 
 It will copy trust relationship policy, inline policies and managed polcies (both AWS and customer-managed).
 
