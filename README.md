@@ -1,10 +1,12 @@
 # Copy AWS IAM role
 
-This is a little script to help with creating a new IAM from from an existing one.
+This is a little script to help with creating a new IAM from an existing one.
 
-[How to make a copy of AWS IAM role with all its policies](https://www.maxivanov.io/copy-aws-iam-role/).
+Based on: [How to make a copy of AWS IAM role with all its policies](https://www.maxivanov.io/copy-aws-iam-role/).
 
-It will copy trust relationship policy, inline policies and managed polcies (both AWS- and customer-managed).
+It will copy trust relationship policy, inline policies and managed polcies (both AWS and customer-managed).
+
+Optionally, it can copy the resources to another account by passing a role to assume as the third argument.
 
 ## Usage
 
@@ -15,16 +17,16 @@ Since the script calls AWS SDK it expects AWS credentials to be set in environme
 ```bash
 npm install
 
-node copy-role.js SOURCE_ROLE_NAME TARGET_ROLE_NAME
+node copy-role.js SOURCE_ROLE_NAME TARGET_ROLE_NAME [ROLE_TO_ASSUME_ARN]
 ```
 
 Example output:
 
 ```bash
-root@7142abe7b6c8:/var/app# node copy-role.js copy-role-poc copy-role-poc-target-role
+root@7142abe7b6c8:/var/app# node copy-role.js copy-role-poc copy-role-poc-target-role arn:aws:iam::123456789098:role/SomeRole
 
 --> Parsing arguments from command line...
-<-- Arguments loaded. Source role name: copy-role-poc, target role name: copy-role-poc-target-role
+<-- Arguments loaded. Source role name: copy-role-poc, target role name: copy-role-poc-target-role, role to assume: arn:aws:iam::123456789098:role/SomeRole
 
 --> Checking if AWS credentials are loaded...
 <-- Credentials found.

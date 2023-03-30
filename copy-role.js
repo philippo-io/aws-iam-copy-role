@@ -1,24 +1,27 @@
 const AWS = require("aws-sdk")
-let iam
 
 ;(async () => {
     try {
-        const [sourceRoleName, targetRoleName] = loadArguments()
+        const [sourceRoleName, targetRoleName, roleToAssumeArn] = loadArguments()
 
         checkAwsCredentials()
 
-        const sourceRole = await fetchRole(sourceRoleName)
-        const inlinePolicies = await fetchInlinePolicies(sourceRoleName)
-        const managedPolicies = await fetchManagedPolicies(sourceRoleName)
+        const iamSrc = new AWS.IAM()
+        const credentialsDest = roleToAssumeArn ? await getCredentials(roleToAssumeArn) : null
+        const iamDst = new AWS.IAM(credentialsDest)
+
+        const sourceRole = await fetchRole(iamSrc, sourceRoleName)
+        const inlinePolicies = await fetchInlinePolicies(iamSrc, sourceRoleName)
+        const managedPolicies = await fetchManagedPolicies(iamSrc, sourceRoleName)
         
-        await createRoleFromExisting(sourceRole, targetRoleName)
+        await createRoleFromExisting(iamDst, sourceRole, targetRoleName)
         
         if (inlinePolicies.length > 0) {
-            await addInlinePolicies(targetRoleName, inlinePolicies)
+            await addInlinePolicies(iamDst, targetRoleName, inlinePolicies)
         }
 
         if (managedPolicies.length > 0) {
-            await addManagedPolicies(targetRoleName, managedPolicies)
+            await addManagedPolicies(iamDst, targetRoleName, managedPolicies)
         }
 
         log('\nDone!')
@@ -31,12 +34,11 @@ function loadArguments() {
     log('\n--> Parsing arguments from command line...')
     
     const cmdArgs = process.argv.slice(2)
-    if (cmdArgs.length !== 2) {
-        throw new TypeError("<-- Usage: node copy-role.js SOURCE_ROLE_NAME TARGET_ROLE_NAME")
+    if (cmdArgs.length < 2) {
+        throw new TypeError("<-- Usage: node copy-role.js SOURCE_ROLE_NAME TARGET_ROLE_NAME [ROLE_TO_ASSUME_ARN]")
     }
 
-    log(`<-- Arguments loaded. Source role name: ${cmdArgs[0]}, target role name: ${cmdArgs[1]}`)
-
+    log(`<-- Arguments loaded. Source role name: ${cmdArgs[0]}, target role name: ${cmdArgs[1]}, role to assume: ${cmdArgs.length >= 3 ? cmdArgs[2] : "-"}`)
     return cmdArgs
 }
 
@@ -50,12 +52,12 @@ function checkAwsCredentials() {
     log('<-- AWS credentials found.')
 }
 
-async function fetchRole(roleName) {
+async function fetchRole(iam, roleName) {
     log('\n--> Fetching source role...')
 
     let role
     try {
-        role = (await getIam().getRole({RoleName: roleName}).promise()).Role
+        role = (await iam.getRole({RoleName: roleName}).promise()).Role
     } catch (e) {
         throw new Error(`<-- Failed to fetch source role: "${e.message}"`)
     }
@@ -65,7 +67,7 @@ async function fetchRole(roleName) {
     return role
 }
 
-async function fetchInlinePolicies(roleName) {
+async function fetchInlinePolicies(iam, roleName) {
     log(`\n--> Fetching inline policy names for ${roleName}...`)
 
     let inlinePolicyNames
@@ -87,7 +89,7 @@ async function fetchInlinePolicies(roleName) {
 
     try {
         for (const inlinePolicyName of inlinePolicyNames) {
-            inlinePolies.push(await getIam().getRolePolicy({RoleName: roleName, PolicyName: inlinePolicyName}).promise())
+            inlinePolies.push(await iam.getRolePolicy({RoleName: roleName, PolicyName: inlinePolicyName}).promise())
         }
     } catch (e) {
         throw new Error(`<-- Failed to fetch inline policy: "${e.message}"`)
@@ -100,7 +102,7 @@ async function fetchInlinePolicies(roleName) {
     async function fetchInlinePoliciesRecursive(marker) {
         let inlinePolicyNames
         
-        const response = await getIam().listRolePolicies({RoleName: roleName, Marker: marker}).promise()
+        const response = await iam.listRolePolicies({RoleName: roleName, Marker: marker}).promise()
         inlinePolicyNames = response.PolicyNames
 
         if (response.IsTruncated) {
@@ -111,7 +113,7 @@ async function fetchInlinePolicies(roleName) {
     }
 }
 
-async function fetchManagedPolicies(roleName) {
+async function fetchManagedPolicies(iam, roleName) {
     log(`\n--> Fetching managed policies for ${roleName}...`)
 
     let managedPolicies
@@ -128,7 +130,7 @@ async function fetchManagedPolicies(roleName) {
     async function fetchManagedPoliciesRecursive(marker) {
         let managedPolicies
         
-        const response = await getIam().listAttachedRolePolicies({RoleName: roleName, Marker: marker}).promise()
+        const response = await iam.listAttachedRolePolicies({RoleName: roleName, Marker: marker}).promise()
         managedPolicies = response.AttachedPolicies
 
         if (response.IsTruncated) {
@@ -139,12 +141,12 @@ async function fetchManagedPolicies(roleName) {
     }
 }
 
-async function createRoleFromExisting(sourceRole, targetRoleName) {
+async function createRoleFromExisting(iam, sourceRole, targetRoleName) {
     log(`\n--> Creating a new role ${targetRoleName}...`)
 
     let targetRole
     try {
-        targetRole = (await getIam().createRole({
+        targetRole = (await iam.createRole({
             Path: sourceRole.Path,
             RoleName: targetRoleName,
             AssumeRolePolicyDocument: decodeURIComponent(sourceRole.AssumeRolePolicyDocument),
@@ -162,12 +164,12 @@ async function createRoleFromExisting(sourceRole, targetRoleName) {
     return targetRole
 }
 
-async function addInlinePolicies(targetRoleName, policies) {
+async function addInlinePolicies(iam, targetRoleName, policies) {
     log(`\n--> Adding inline policies to ${targetRoleName}...`)
 
     try {
         for (const policy of policies) {
-            await getIam().putRolePolicy({
+            await iam.putRolePolicy({
                 RoleName: targetRoleName,
                 PolicyName: policy.PolicyName,
                 PolicyDocument: decodeURIComponent(policy.PolicyDocument),
@@ -180,12 +182,12 @@ async function addInlinePolicies(targetRoleName, policies) {
     log(`<-- Added ${policies.length} inline policies.`)
 }
 
-async function addManagedPolicies(targetRoleName, policies) {
+async function addManagedPolicies(iam, targetRoleName, policies) {
     log(`\n--> Adding managed policies to ${targetRoleName}...`)
 
     try {
         for (const policy of policies) {
-            await getIam().attachRolePolicy({
+            await iam.attachRolePolicy({
                 RoleName: targetRoleName,
                 PolicyArn: policy.PolicyArn,
             }).promise()
@@ -197,12 +199,29 @@ async function addManagedPolicies(targetRoleName, policies) {
     log(`<-- Added ${policies.length} managed policies.`)
 }
 
-function getIam() {
-    if (!iam) {
-        iam = new AWS.IAM()
+async function getCredentials(roleToAssume) {
+    if (!roleToAssume) {
+        return
     }
 
-    return iam
+    return await assumeRole(roleToAssume)
+}
+
+async function assumeRole(roleArn) {
+    try {
+        const data = await (new AWS.STS()).assumeRole({
+            RoleArn: roleArn,
+            RoleSessionName: `aws-iam-copy-role-${(new Date()).getTime()}`
+        }).promise()
+
+        return {
+            accessKeyId: data.Credentials.AccessKeyId,
+            secretAccessKey: data.Credentials.SecretAccessKey,
+            sessionToken: data.Credentials.SessionToken,
+        }
+    } catch (e) {
+        throw new Error(`<-- Failed to assume role ${roleArn}: "${e.message}"`)
+    }
 }
 
 function log(message) {
